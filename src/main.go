@@ -28,6 +28,8 @@ const managedByLabelKey = "app.kubernetes.io/managed-by"
 const managedByLabelValue = annotationPrefix
 const forPodLabelKey = "dynamic-hostports.k8s/for-pod"
 
+const disabledNodeAnnotation = "dynamic-hostports.k8s/disabled"
+
 var log = logLib.New(os.Stdout, "", 0)
 var logErr = logLib.New(os.Stderr, "", 0)
 
@@ -59,6 +61,10 @@ func podPortToServiceName(pod *v1.Pod, requestedPort int32) string {
 }
 
 func createService(client *kubernetes.Clientset, pod *v1.Pod, requestedPort int32, cachedExternalIPs map[string]string) error {
+	if isDisabledAnnotationNode(client, pod.Spec.NodeName) {
+		log.Printf("[%s] Node has disabled annotation. Skipping recreation.", pod.Name)
+		return nil
+	}
 	if pod.Annotations[podPortToAnnotation(requestedPort)] != "" {
 		log.Printf("[%s] Pod already has service annotation for port %d. Skipping recreation.", pod.Name, requestedPort)
 		return nil
@@ -163,6 +169,19 @@ func getOrFetchExternalNodeIp(client *kubernetes.Clientset, nodeName string, cac
 	}
 
 	return ip
+}
+
+func isDisabledAnnotationNode(client *kubernetes.Clientset, nodeName string) bool {
+	node, err := client.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		log.Printf("Got an error while fetching the disabled annotation for the node '%s'. %s", nodeName, err)
+		return false
+	}
+	if node.Annotations[disabledNodeAnnotation] == "true" {
+		return true
+	} else {
+		return false
+	}
 }
 
 func addPodPortAnnotation(client *kubernetes.Clientset, pod *v1.Pod, requestedPort int32, dynamicPort int32) error {
